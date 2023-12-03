@@ -63721,7 +63721,7 @@
                         }
                     ],
                     "enabled": true,
-                    "end_depth": 3.8099999999999996,
+                    "end_depth": 1.778,
                     "name": "Quote",
                     "ofset_dir": 0,
                     "speeds": {
@@ -63781,7 +63781,7 @@
                         }
                     ],
                     "enabled": true,
-                    "end_depth": 2.54,
+                    "end_depth": 1.778,
                     "name": "Quote",
                     "ofset_dir": 0,
                     "speeds": {
