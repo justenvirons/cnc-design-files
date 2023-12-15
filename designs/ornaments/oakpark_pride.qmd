@@ -1,0 +1,36 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r}
+library(sf)
+library(dplyr)
+library(tidyverse)
+library(tigris)
+```
+
+
+# download shapefile data
+```{r}
+# download community area boundaries
+community_areas <- st_read("https://data.cityofchicago.org/api/geospatial/cauq-8yn6?method=export&format=GeoJSON")
+community_areas <- st_transform(community_areas, crs=26916) %>% select(name = community)
+
+# download city of chicago boundaries
+chicago <- st_read("https://data.cityofchicago.org/api/geospatial/ewy2-6yfk?method=export&format=GeoJSON")
+chicago <- st_transform(chicago, crs=26916) %>% select(name)
+
+# download village of oak park boundaries
+oakpark <- places(cb=TRUE, state="IL") %>% filter(GEOID=="1754885")  %>% st_transform(crs=26916) %>% select(name = NAME)
+
+
+# join chicago with oakpark
+chicago_oakpark <- chicago %>% bind_rows(oakpark) %>% st_simplify(preserveTopology = TRUE, dTolerance = 175)
+
+plot(chicago_oakpark)
+
+plot(chicago)
+
+```
+
