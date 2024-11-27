@@ -1,0 +1,9 @@
+-----BEGIN LICENSE-----
+Name: christopher smith
+Start: 2023-12-23
+End: 2024-12-23
+Type: Subscription-365
+Verify: 9d694cef-a5c3-186f-909d-e419b33ed8e0
+Version: 001-1
+###c31588f7bb83bc8bfa34beb9c8daefa6585ea434f3fa5178e1ecc3c1b3f295c4###
+-----END LICENSE-----
