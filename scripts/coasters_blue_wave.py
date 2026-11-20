@@ -9,7 +9,6 @@ mill, zero at the centre of the stock top):
 
     layer "text"  - candidate name + tagline   -> pocket, #122, 1.27 mm
     layer "state" - state silhouette           -> pocket, #122, 1.27 mm
-    layer "wave"  - small blue wave (epoxy)    -> pocket, #122, 1.524 mm
 
 Usage:  python3 scripts/coasters_blue_wave.py
 Requires: shapely, fonttools
@@ -24,7 +23,7 @@ from pathlib import Path
 from fontTools.pens.recordingPen import RecordingPen
 from fontTools.ttLib import TTFont
 from shapely import affinity
-from shapely.geometry import LineString, MultiPolygon, Point, Polygon
+from shapely.geometry import MultiPolygon, Point, Polygon
 from shapely.ops import unary_union
 
 REPO = Path(__file__).resolve().parents[1]
@@ -56,9 +55,9 @@ DESIGNS = [
 ]
 
 # vertical bands, y measured upward from the coaster centre
-NAME_BASE, NAME_CAP_MAX = 16.2, 10.5
-STATE_TOP, STATE_BOTTOM, STATE_W_MAX = 12.6, -8.8, 48.0
-TAG_BASE, TAG_CAP_MAX = -17.3, 6.4
+NAME_BASE, NAME_CAP_MAX = 14.5, 11.0
+STATE_TOP, STATE_BOTTOM, STATE_W_MAX = 11.0, -13.4, 50.0
+TAG_BASE, TAG_CAP_MAX = -23.0, 7.5
 TEXT_MARGIN = 3.0       # extra clearance from the safe circle for text
 
 # ---------------------------------------------------------------- geometry helpers
@@ -167,54 +166,6 @@ def state_shape(name):
     return g
 
 
-def _catmull_rom(pts, n=16):
-    """Smooth curve through the given points (centripetal-ish uniform Catmull-Rom)."""
-    P = [pts[0]] + list(pts) + [pts[-1]]
-    out = [pts[0]]
-    for i in range(1, len(P) - 2):
-        p0, p1, p2, p3 = P[i - 1], P[i], P[i + 1], P[i + 2]
-        for k in range(1, n + 1):
-            t = k / n
-            t2, t3 = t * t, t * t * t
-            out.append(tuple(0.5 * (2 * p1[j] + (-p0[j] + p2[j]) * t
-                                    + (2 * p0[j] - 5 * p1[j] + 4 * p2[j] - p3[j]) * t2
-                                    + (-p0[j] + 3 * p1[j] - 3 * p2[j] + p3[j]) * t3) for j in range(2)))
-    return out
-
-
-# Line-art wave, drawn on a 1000 x 700 grid (y down) and scaled to fit.
-WAVE_STROKES = [
-    # back of the wave rising from the left, rolling over into the crest hook
-    [(75, 530), (150, 450), (215, 360), (290, 245), (370, 160), (460, 105), (560, 80), (650, 95),
-     (715, 140), (745, 200), (740, 260), (705, 300), (660, 312), (642, 304)],
-    # inner tube: crescent that sweeps down and tapers to a point at the right
-    [(688, 285), (688, 245), (655, 215), (585, 207), (518, 236), (480, 300), (470, 385), (498, 465),
-     (558, 530), (648, 576), (758, 590), (860, 570), (930, 540), (830, 549), (730, 540), (640, 505),
-     (585, 440), (560, 360), (566, 288), (602, 244), (648, 230), (676, 240)],
-    # water line underneath
-    [(185, 652), (265, 642), (335, 618), (398, 588), (438, 582), (432, 608), (446, 640), (490, 656),
-     (548, 646), (590, 636), (618, 642), (626, 662), (660, 676), (735, 680)],
-]
-WAVE_STROKE_W = 1.05      # groove width in mm (> 0.795 mm #122 so the epoxy channel is clean)
-
-
-def wave_shape():
-    """A single line-art breaking wave: three grooves for blue epoxy."""
-    lines = [LineString(_catmull_rom(st)) for st in WAVE_STROKES]
-    top_y = TAG_BASE - 1.7
-    sc = 0.05
-    for _ in range(200):
-        segs = [affinity.scale(l, sc, -sc, origin=(0, 0)) for l in lines]   # flip y (grid is y-down)
-        g = unary_union([l.buffer(WAVE_STROKE_W / 2, cap_style=1, join_style=1, quad_segs=12)
-                         for l in segs])
-        bx0, by0, bx1, by1 = g.bounds
-        g = affinity.translate(g, -(bx0 + bx1) / 2, top_y - by1)
-        if g.difference(Point(0, 0).buffer(R_SAFE - 0.3, quad_segs=64)).area < 1e-6:
-            break
-        sc *= 0.99
-    return g.simplify(0.02)
-
-
 def to_stock(g):
     """Coaster-centred coords (y up) -> Carbide Create stock coords (origin bottom-left)."""
     return affinity.translate(g, CX, CY)
@@ -290,7 +241,7 @@ def pocket_toolpath(name, depth, layer_uuid, group_uuid):
 
 
 PARAMS = {
-    "num_toolpaths": "3", "minimum_carbide_motion_version": "565", "requires_pro": "0",
+    "num_toolpaths": "2", "minimum_carbide_motion_version": "565", "requires_pro": "0",
     "active_layer": "", "version": "100", "build_num": "764", "minimum_build_num": "714",
     "width": f"{STOCK}", "height": f"{STOCK}", "thickness": f"{THICKNESS}", "display_mm": "0",
     "grid_enabled": "1", "grid_spacing": "0.254", "zero_z": "0.0", "zero_x": f"{CX}",
@@ -374,8 +325,8 @@ def outline_svg(layers):
 
 
 def preview_svg(layers, title):
-    """Coloured mock-up: wood round, pocketed areas darker, wave filled blue."""
-    fills = {"text": "#5a3b1e", "state": "#5a3b1e", "wave": "#1f5fbf"}
+    """Coloured mock-up: wood round with pocketed areas darker."""
+    fills = {"text": "#5a3b1e", "state": "#5a3b1e"}
     paths = "\n".join(f'  <path d="{svg_path_d(g)}" fill="{fills[n]}" fill-rule="evenodd" />'
                       for n, (_rgb, g, _d, _t) in layers.items())
     return f"""<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600" viewBox="0 0 {STOCK} {STOCK}">
@@ -395,17 +346,15 @@ def build(d, font, num_font):
     tag, cap_t = text_block(d["tag"], font, num_font, TAG_BASE, TAG_CAP_MAX)
     text = unary_union([name, tag])
     state = state_shape(d["state"])
-    wave = wave_shape()
-    for g, label in ((text, "text"), (state, "state"), (wave, "wave")):
+    for g, label in ((text, "text"), (state, "state")):
         assert g.difference(Point(0, 0).buffer(R_SAFE, quad_segs=64)).area < 1e-6, f"{label} outside safe circle"
-    assert not text.intersects(state) and not state.intersects(wave) and not text.intersects(wave)
+    assert not text.intersects(state)
     print(f"  {d['file']}: name cap {cap_n:.1f} mm, tagline cap {cap_t:.1f} mm")
-    for g, label in ((text, "text"), (state, "state"), (wave, "wave")):
+    for g, label in ((text, "text"), (state, "state")):
         check_cuttable(label, g)
     return {
         "text": ((0, 0, 255), to_stock(text), 1.270, "Text - pocket #122 1.27mm"),
         "state": ((0, 128, 0), to_stock(state), 1.270, "State - pocket #122 1.27mm"),
-        "wave": ((0, 160, 255), to_stock(wave), 1.524, "Blue wave - pocket #122 1.524mm (epoxy)"),
     }
 
 
@@ -419,7 +368,7 @@ def main():
         layers = build(d, font, num_font)
         notes = (f"2026 Blue Wave coaster - {d['name']} / {d['tag']} ({d['state']})\n"
                  "Pre-cut live-edge round, 3in workable diameter. Zero XY at centre, Z at top.\n"
-                 "Tool: #122 1/32in flat. Text + state pocket 1.27mm; wave pocket 1.524mm for blue epoxy.\n"
+                 "Tool: #122 1/32in flat. Text + state pocket 1.27mm.\n"
                  "Generated by scripts/coasters_blue_wave.py\n")
         write_c2d(OUT_DIR / f"{d['file']}.c2d", layers, notes, outline_svg(layers))
         (OUT_DIR / "previews" / f"{d['file']}.svg").write_text(

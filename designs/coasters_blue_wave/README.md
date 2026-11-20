@@ -21,7 +21,6 @@ XY zero at the coaster centre, Z zero at the top surface. All artwork stays insi
 |---|---|---|---|
 | `text` | pocket | #122 1/32" flat | 1.27 mm |
 | `state` | pocket | #122 1/32" flat | 1.27 mm |
-| `wave` | pocket (fill with blue epoxy) – line-art breaking wave, ~1 mm grooves | #122 1/32" flat | 1.524 mm |
 
 Toolpaths are layer-based; Carbide Create computes them when the file is opened (no G-code stored).
 
@@ -32,7 +31,7 @@ pip install shapely fonttools
 python3 scripts/coasters_blue_wave.py
 ```
 
-Layout constants (text sizes, band positions, wave size, depths) are at the top of the script.
+Layout constants (text sizes, band positions, depths) are at the top of the script.
 Names use Anton (`fonts/Anton-Regular.ttf`, SIL OFL). Numbers use Arial Bold if `fonts/arialbd.ttf`
 exists, otherwise Liberation Sans Bold (metric-compatible Arial clone). State outlines come from
 US Census boundaries via us-atlas (`data/states_tx_mi.geojson`).
