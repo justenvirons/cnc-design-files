@@ -1,5 +1,5 @@
 ---
-title: "State outlines for the 2026 Blue Wave coasters"
+title: "State outlines and Michigan county results for the 2026 Blue Wave coasters"
 author: "C. Scott Smith, PhD AICP"
 date: today
 format:
@@ -17,6 +17,10 @@ Download simple state outlines for **Texas** and **Michigan** with the
 [`tigris`](https://github.com/walkerke/tigris) package and export each one as an
 SVG file in this directory (`designs/coasters_blue_wave/`). The SVGs are sized
 in millimetres so they import into Carbide Create at a known size.
+
+A second section downloads **Michigan county** geometries and joins them to
+county-level results from the **2026 U.S. Senate race** (Abdul El-Sayed vs.
+Mike Rogers), with each candidate's share of the vote by county.
 
 Notes on the choices below:
 
@@ -128,5 +132,132 @@ for (s in state_specs$name) {
     st_transform(state_specs$crs[state_specs$name == s]) |>
     keep_main_parts(min_part_frac) |>
     plot(col = "grey20", border = NA, main = tools::toTitleCase(s))
+}
+```
+
+## Michigan counties and 2026 U.S. Senate results
+
+### County geometries
+
+```{r}
+#| label: mi-counties
+
+mi_counties <- counties(state = "MI", cb = TRUE, resolution = "500k", year = 2023) |>
+  st_transform(3078) |>                       # NAD83 / Michigan Oblique Mercator
+  select(GEOID, county = NAME, geometry) |>
+  arrange(county)
+
+nrow(mi_counties)   # 83
+```
+
+### Election results
+
+County results are read from `data/mi_senate_2026_by_county.csv`, one row per
+county:
+
+| column | contents |
+|---|---|
+| `GEOID` | 5-digit county FIPS code (e.g. `26163` for Wayne) |
+| `county` | county name as tigris spells it (e.g. `St. Joseph`) |
+| `el_sayed_votes` | votes for Abdul El-Sayed (D) |
+| `rogers_votes` | votes for Mike Rogers (R) |
+| `other_votes` | votes for all other candidates and write-ins |
+
+If the file doesn't exist, the chunk below writes a template with all 83
+counties and empty vote columns. Fill it in from the Michigan Secretary of
+State's official county results, or another source such as the race's Wikipedia
+page, then render again. Rows are matched on `GEOID`; when `GEOID` is blank,
+the county name is used instead. Note that Michigan's results are unofficial
+until the Board of State Canvassers certifies them.
+
+```{r}
+#| label: senate-results
+
+results_file <- file.path("data", "mi_senate_2026_by_county.csv")
+
+if (!file.exists(results_file)) {
+  dir.create(dirname(results_file), showWarnings = FALSE)
+  mi_counties |>
+    st_drop_geometry() |>
+    transmute(GEOID, county,
+              el_sayed_votes = NA_integer_, rogers_votes = NA_integer_,
+              other_votes = NA_integer_) |>
+    write.csv(results_file, row.names = FALSE, na = "")
+  message("Wrote a blank results template to ", results_file,
+          " - fill in the vote counts and render again.")
+}
+
+norm_name <- function(x) tolower(gsub("[^A-Za-z]", "", sub(" County$", "", x)))
+
+results <- read.csv(results_file, colClasses = c(GEOID = "character"),
+                    stringsAsFactors = FALSE) |>
+  mutate(GEOID = ifelse(is.na(GEOID) | GEOID == "", NA, sprintf("%05d", as.integer(GEOID))))
+
+# fill any missing GEOIDs from the county name
+name_lookup <- mi_counties |> st_drop_geometry() |> mutate(key = norm_name(county))
+results <- results |>
+  mutate(key = norm_name(county)) |>
+  left_join(select(name_lookup, key, GEOID_from_name = GEOID), by = "key") |>
+  mutate(GEOID = coalesce(GEOID, GEOID_from_name)) |>
+  select(-key, -GEOID_from_name, -county)
+
+# vote shares and margin by county
+results <- results |>
+  mutate(other_votes    = coalesce(other_votes, 0L),
+         total_votes    = el_sayed_votes + rogers_votes + other_votes,
+         el_sayed_pct   = 100 * el_sayed_votes / total_votes,
+         rogers_pct     = 100 * rogers_votes   / total_votes,
+         margin_pct     = el_sayed_pct - rogers_pct,          # + = El-Sayed ahead
+         winner         = case_when(margin_pct > 0 ~ "El-Sayed",
+                                    margin_pct < 0 ~ "Rogers",
+                                    .default = NA_character_))
+
+mi_senate <- mi_counties |> left_join(results, by = "GEOID")
+
+# checks: unmatched rows and counties still missing results
+unmatched <- anti_join(results, st_drop_geometry(mi_counties), by = "GEOID")
+if (nrow(unmatched) > 0) warning(nrow(unmatched), " results row(s) did not match a county")
+n_missing <- sum(is.na(mi_senate$total_votes))
+if (n_missing > 0) message(n_missing, " of 83 counties have no results yet")
+
+# statewide totals from the county rows
+mi_senate |>
+  st_drop_geometry() |>
+  summarise(counties = sum(!is.na(total_votes)),
+            el_sayed_votes = sum(el_sayed_votes, na.rm = TRUE),
+            rogers_votes   = sum(rogers_votes,   na.rm = TRUE),
+            total_votes    = sum(total_votes,    na.rm = TRUE)) |>
+  mutate(el_sayed_pct = round(100 * el_sayed_votes / total_votes, 2),
+         rogers_pct   = round(100 * rogers_votes   / total_votes, 2))
+```
+
+### County table
+
+```{r}
+#| label: senate-table
+
+mi_senate |>
+  st_drop_geometry() |>
+  transmute(county, el_sayed_votes, el_sayed_pct = round(el_sayed_pct, 1),
+            rogers_votes, rogers_pct = round(rogers_pct, 1),
+            margin_pct = round(margin_pct, 1), winner) |>
+  arrange(desc(margin_pct))
+```
+
+### Map
+
+```{r}
+#| label: senate-map
+#| fig-width: 7
+#| fig-height: 8
+
+if (all(is.na(mi_senate$margin_pct))) {
+  message("No results yet - fill in ", results_file, " to draw the map.")
+} else {
+  lim <- max(abs(mi_senate$margin_pct), na.rm = TRUE)
+  pal <- colorRampPalette(c("#b2182b", "#f7f7f7", "#2166ac"))(21)   # Rogers - even - El-Sayed
+  plot(mi_senate["margin_pct"], pal = pal, breaks = seq(-lim, lim, length.out = 22),
+       border = "white", lwd = 0.3,
+       main = "2026 U.S. Senate, Michigan: El-Sayed minus Rogers (percentage points)")
 }
 ```
