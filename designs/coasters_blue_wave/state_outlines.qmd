@@ -365,3 +365,64 @@ write_features_svg(filter(county_shapes, margin_pct > 0), svg_es, width_mm, fram
 tibble::tibble(file     = basename(c(svg_all, svg_es)),
                counties = c(nrow(county_shapes), sum(county_shapes$margin_pct > 0)))
 ```
+
+## Congress by party, 2024 vs. 2026
+
+A 2x2 matrix of bar charts (rows = chamber, columns = year) showing the share
+of seats held by each party, exported as `congress_party_share_2024_2026.svg`
+in this folder. "Other" covers independents. Shares are computed within each
+chamber and year (100 Senate seats, 435 House seats).
+
+```{r}
+#| label: congress-party-share
+#| fig-width: 7
+#| fig-height: 6
+
+library(ggplot2)
+
+congress <- tibble::tribble(
+  ~chamber, ~year, ~party,       ~seats,
+  "Senate", 2024,  "Republican", 53,
+  "Senate", 2024,  "Democratic", 45,
+  "Senate", 2024,  "Other",       2,
+  "Senate", 2026,  "Republican", 44,
+  "Senate", 2026,  "Democratic", 54,
+  "Senate", 2026,  "Other",       2,
+  "House",  2024,  "Republican", 220,
+  "House",  2024,  "Democratic", 215,
+  "House",  2024,  "Other",       0,
+  "House",  2026,  "Republican", 178,
+  "House",  2026,  "Democratic", 257,
+  "House",  2026,  "Other",       0
+) |>
+  group_by(chamber, year) |>
+  mutate(share = seats / sum(seats)) |>
+  ungroup() |>
+  mutate(chamber = factor(chamber, levels = c("Senate", "House")),
+         party   = factor(party, levels = c("Republican", "Democratic", "Other")),
+         label   = sprintf("%.0f%%\n(%d)", 100 * share, seats))
+
+party_cols <- c(Republican = "#b2182b", Democratic = "#2166ac", Other = "#8c8c8c")
+
+p_congress <- ggplot(congress, aes(x = party, y = share, fill = party)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = label), vjust = -0.3, size = 3.2, lineheight = 0.9, colour = "grey20") +
+  facet_grid(chamber ~ year) +
+  scale_fill_manual(values = party_cols, guide = "none") +
+  scale_y_continuous(labels = scales::label_percent(), limits = c(0, 0.75),
+                     breaks = seq(0, 0.75, 0.25), expand = expansion(mult = c(0, 0.02))) +
+  labs(title = "Share of seats by party, 2024 vs. 2026",
+       subtitle = "Percent of chamber (number of seats); Other = independents",
+       x = NULL, y = NULL) +
+  theme_minimal(base_size = 11) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor   = element_blank(),
+        panel.grid.major.y = element_line(colour = "grey90", linewidth = 0.3),
+        strip.text         = element_text(face = "bold", size = 11),
+        panel.spacing      = unit(1.2, "lines"),
+        plot.title         = element_text(face = "bold"))
+
+ggsave(file.path(out_dir, "congress_party_share_2024_2026.svg"), p_congress,
+       width = 7, height = 6, units = "in")
+p_congress
+```
