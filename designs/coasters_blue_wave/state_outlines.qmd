@@ -46,9 +46,10 @@ library(dplyr)
 
 options(tigris_use_cache = TRUE)
 
-# Work from this document's folder whether rendered by Quarto (runs in the
-# document's directory) or run chunk-by-chunk from the RStudio project root.
-out_dir <- if (file.exists("state_outlines.qmd")) "." else file.path("designs", "coasters_blue_wave")
+# All files live in this document's folder. here::here() finds the project root
+# (the .Rproj file) whether the document is rendered by Quarto or run
+# chunk-by-chunk in RStudio, so paths work from either working directory.
+out_dir <- here::here("designs", "coasters_blue_wave")
 
 # Export settings ----------------------------------------------------------
 width_mm      <- 45     # width of each exported outline in millimetres
@@ -182,7 +183,7 @@ summary is also written to `data/mi_senate_2026_by_county.csv`.
 ```{r}
 #| label: senate-results
 
-sos_file <- file.path(out_dir, "designs/coasters_blue_wave/data", "2026STATE_GENERAL_MI_CENR_BY_COUNTY.txt")
+sos_file <- file.path(out_dir, "data", "2026STATE_GENERAL_MI_CENR_BY_COUNTY.txt")
 
 sos <- read.delim(sos_file, colClasses = "character", check.names = FALSE,
                   quote = "", strip.white = TRUE)
