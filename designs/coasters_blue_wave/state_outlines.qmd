@@ -1,0 +1,132 @@
+---
+title: "State outlines for the 2026 Blue Wave coasters"
+author: "C. Scott Smith, PhD AICP"
+date: today
+format:
+  html:
+    code-fold: false
+    toc: true
+execute:
+  warning: false
+  message: false
+---
+
+## Purpose
+
+Download simple state outlines for **Texas** and **Michigan** with the
+[`tigris`](https://github.com/walkerke/tigris) package and export each one as an
+SVG file in this directory (`designs/coasters_blue_wave/`). The SVGs are sized
+in millimetres so they import into Carbide Create at a known size.
+
+Notes on the choices below:
+
+- `cb = TRUE` uses the Census *cartographic boundary* file, which is clipped to
+  the shoreline. The full TIGER/Line state polygons include Great Lakes water,
+  which would make Michigan look like a big block.
+- `resolution = "20m"` is the most generalized version, which suits a 3" coaster
+  and a 1/32" end mill.
+- Each state is projected to a local equal-area / conformal CRS so the shape
+  isn't stretched the way raw latitude/longitude would be.
+- Small islands (Isle Royale, Beaver Island, the Texas barrier islands, etc.) are
+  dropped below a size threshold. Set `min_part_frac <- 0` to keep everything.
+
+## Download and export
+
+```{r}
+#| label: state-outlines
+
+library(tigris)
+library(sf)
+library(dplyr)
+
+options(tigris_use_cache = TRUE)
+
+out_dir <- "."          # Quarto runs chunks in the document's own directory
+
+# Export settings ----------------------------------------------------------
+width_mm      <- 45     # width of each exported outline in millimetres
+min_part_frac <- 0.02   # drop polygon parts smaller than 2% of the largest part
+simplify_m    <- 250    # extra simplification tolerance in metres (0 = none)
+
+state_specs <- tibble::tribble(
+  ~name,      ~abbr, ~crs,
+  "texas",    "TX",  3083,   # NAD83 / Texas Centric Albers Equal Area
+  "michigan", "MI",  3078    # NAD83 / Michigan Oblique Mercator
+)
+
+# Download -----------------------------------------------------------------
+states_cb <- states(cb = TRUE, resolution = "20m", year = 2023)
+
+# Helpers ------------------------------------------------------------------
+
+# Keep the main land masses of a (multi)polygon; drop small islands
+keep_main_parts <- function(geom, min_frac) {
+  parts <- st_cast(st_geometry(geom), "POLYGON")
+  areas <- as.numeric(st_area(parts))
+  parts[areas >= min_frac * max(areas)] |> st_union()
+}
+
+# Write an sf polygon geometry (projected, metres) to an SVG sized in mm
+write_state_svg <- function(geom, file, width_mm) {
+  bb    <- st_bbox(geom)
+  scale <- width_mm / as.numeric(bb["xmax"] - bb["xmin"])
+  h_mm  <- as.numeric(bb["ymax"] - bb["ymin"]) * scale
+
+  # one row per vertex; L1 = ring within polygon, L2 = polygon
+  xy <- st_coordinates(st_cast(st_geometry(geom), "POLYGON"))
+  xy <- as.data.frame(xy) |>
+    mutate(x = (X - bb["xmin"]) * scale,
+           y = (bb["ymax"] - Y) * scale)          # SVG y runs downward
+
+  rings <- split(xy, list(xy$L2, xy$L1), drop = TRUE)
+  d <- vapply(rings, function(r) {
+    pts <- sprintf("%.3f,%.3f", r$x, r$y)
+    paste0("M", pts[1], " L", paste(pts[-1], collapse = " "), " Z")
+  }, character(1))
+
+  svg <- c(
+    '<?xml version="1.0" encoding="UTF-8" standalone="no"?>',
+    sprintf(paste0('<svg xmlns="http://www.w3.org/2000/svg" version="1.1" ',
+                   'width="%.3fmm" height="%.3fmm" viewBox="0 0 %.3f %.3f">'),
+            width_mm, h_mm, width_mm, h_mm),
+    sprintf('  <path d="%s" fill="black" fill-rule="evenodd" stroke="none"/>',
+            paste(d, collapse = " ")),
+    "</svg>"
+  )
+  writeLines(svg, file)
+  invisible(c(width_mm = width_mm, height_mm = h_mm))
+}
+
+# Export -------------------------------------------------------------------
+sizes <- lapply(seq_len(nrow(state_specs)), function(i) {
+  s <- state_specs[i, ]
+  geom <- states_cb |>
+    filter(STUSPS == s$abbr) |>
+    st_transform(s$crs) |>
+    keep_main_parts(min_part_frac)
+  if (simplify_m > 0) geom <- st_simplify(geom, preserveTopology = TRUE, dTolerance = simplify_m)
+
+  file <- file.path(out_dir, paste0(s$name, "_outline.svg"))
+  dims <- write_state_svg(geom, file, width_mm)
+  tibble::tibble(state = s$name, file = file,
+                 width_mm = dims[["width_mm"]], height_mm = round(dims[["height_mm"]], 1))
+})
+bind_rows(sizes)
+```
+
+## Preview
+
+```{r}
+#| label: preview
+#| fig-width: 8
+#| fig-height: 4
+
+par(mfrow = c(1, 2), mar = c(0, 0, 2, 0))
+for (s in state_specs$name) {
+  states_cb |>
+    filter(STUSPS == state_specs$abbr[state_specs$name == s]) |>
+    st_transform(state_specs$crs[state_specs$name == s]) |>
+    keep_main_parts(min_part_frac) |>
+    plot(col = "grey20", border = NA, main = tools::toTitleCase(s))
+}
+```
