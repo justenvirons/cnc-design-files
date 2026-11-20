@@ -57,8 +57,8 @@ DESIGNS = [
 
 # vertical bands, y measured upward from the coaster centre
 NAME_BASE, NAME_CAP_MAX = 16.2, 10.5
-STATE_TOP, STATE_BOTTOM, STATE_W_MAX = 12.4, -10.4, 48.0
-TAG_BASE, TAG_CAP_MAX = -19.0, 6.6
+STATE_TOP, STATE_BOTTOM, STATE_W_MAX = 12.6, -8.8, 48.0
+TAG_BASE, TAG_CAP_MAX = -17.3, 6.4
 TEXT_MARGIN = 3.0       # extra clearance from the safe circle for text
 
 # ---------------------------------------------------------------- geometry helpers
@@ -167,94 +167,52 @@ def state_shape(name):
     return g
 
 
-def _arc(cx, cy, r, a0, a1, n=72):
-    return [(cx + r * math.cos(math.radians(a0 + (a1 - a0) * i / n)),
-             cy + r * math.sin(math.radians(a0 + (a1 - a0) * i / n))) for i in range(n + 1)]
+def _catmull_rom(pts, n=16):
+    """Smooth curve through the given points (centripetal-ish uniform Catmull-Rom)."""
+    P = [pts[0]] + list(pts) + [pts[-1]]
+    out = [pts[0]]
+    for i in range(1, len(P) - 2):
+        p0, p1, p2, p3 = P[i - 1], P[i], P[i + 1], P[i + 2]
+        for k in range(1, n + 1):
+            t = k / n
+            t2, t3 = t * t, t * t * t
+            out.append(tuple(0.5 * (2 * p1[j] + (-p0[j] + p2[j]) * t
+                                    + (2 * p0[j] - 5 * p1[j] + 4 * p2[j] - p3[j]) * t2
+                                    + (-p0[j] + 3 * p1[j] - 3 * p2[j] + p3[j]) * t3) for j in range(2)))
+    return out
 
 
-def _tapered_stroke(spine, r0, r1):
-    """Union of circles along a spine with radius tapering r0 -> r1 (round-tipped claw)."""
-    n = len(spine) - 1
-    return unary_union([Point(x, y).buffer(r0 + (r1 - r0) * i / n, quad_segs=16)
-                        for i, (x, y) in enumerate(spine)])
+# Line-art wave, drawn on a 1000 x 700 grid (y down) and scaled to fit.
+WAVE_STROKES = [
+    # back of the wave rising from the left, rolling over into the crest hook
+    [(75, 530), (150, 450), (215, 360), (290, 245), (370, 160), (460, 105), (560, 80), (650, 95),
+     (715, 140), (745, 200), (740, 260), (705, 300), (660, 312), (642, 304)],
+    # inner tube: crescent that sweeps down and tapers to a point at the right
+    [(688, 285), (688, 245), (655, 215), (585, 207), (518, 236), (480, 300), (470, 385), (498, 465),
+     (558, 530), (648, 576), (758, 590), (860, 570), (930, 540), (830, 549), (730, 540), (640, 505),
+     (585, 440), (560, 360), (566, 288), (602, 244), (648, 230), (676, 240)],
+    # water line underneath
+    [(185, 652), (265, 642), (335, 618), (398, 588), (438, 582), (432, 608), (446, 640), (490, 656),
+     (548, 646), (590, 636), (618, 642), (626, 662), (660, 676), (735, 680)],
+]
+WAVE_STROKE_W = 1.05      # groove width in mm (> 0.795 mm #122 so the epoxy channel is clean)
 
 
 def wave_shape():
-    """A single great curling wave, simplified woodblock style.
-
-    Built in local units (roughly mm) then scaled to sit under the tagline:
-      body  - back of the wave rising from a tapered tail, rolling over into the crest
-      eye   - hollow under the curl (left as wood), open at the bottom like a tube
-      claws - foam fingers reaching off the leading lip
-      spray - a few foam dots ahead of the crest
-      swell - low trailing water to the right with a small secondary hump
-      stripe- a thin wood line through the body and curl, like a brush stroke
-    """
-    cx, cy, R, RI = 13.0, 6.0, 5.0, 2.6            # crest centre, outer / eye radius
-    lip = -40                                      # angle where the curl ends
-    jx, jy = cx + R * math.cos(math.radians(160)), cy + R * math.sin(math.radians(160))
-    tail_x = 1.5
-    back = [(tail_x + (jx - tail_x) * t, jy * t ** 2.0) for t in (i / 60 for i in range(61))]
-    outer = _arc(cx, cy, R, 160, lip)
-    inner = _arc(cx, cy, RI, lip, 205)
-    fx, fy = inner[-1]
-    face_end = (cx + 2.6, 0.0)
-    ctrl = (cx - 1.6, 0.4)                         # hollow, concave wave face
-    face = [((1 - t) ** 2 * fx + 2 * (1 - t) * t * ctrl[0] + t * t * face_end[0],
-             (1 - t) ** 2 * fy + 2 * (1 - t) * t * ctrl[1] + t * t * face_end[1])
-            for t in (i / 30 for i in range(1, 31))]
-    body = Polygon(back + outer[1:] + inner + face + [(tail_x, 0.0)]).buffer(0)
-
-    # trailing swell with a small hump
-    sw_top = []
-    x_end = cx + 10.0
-    for i in range(61):
-        x = cx + 1.5 + (x_end - cx - 1.5) * i / 60
-        taper = min(1.0, (x_end - x) / 2.2)
-        sw_top.append((x, max(0.0, taper * (0.95 + 1.0 * math.exp(-((x - (cx + 6.3)) / 1.4) ** 2)))))
-    swell = Polygon([(cx + 1.0, 0.0)] + sw_top + [(x_end, 0.0)])
-
-    # foam claws off the outer edge of the crest, curling forward and down
-    claws = []
-    for ang, length in ((36, 2.2), (14, 2.6), (-8, 2.6), (-30, 2.3)):
-        a = math.radians(ang)
-        x, y = cx + (R - 0.5) * math.cos(a), cy + (R - 0.5) * math.sin(a)
-        heading = a - math.radians(20)
-        spine = [(x, y)]
-        for _ in range(12):
-            heading -= math.radians(6.0)            # bend clockwise as it reaches out
-            x += length / 12 * math.cos(heading)
-            y += length / 12 * math.sin(heading)
-            spine.append((x, y))
-        claws.append(_tapered_stroke(spine, 0.8, 0.5))
-
-    spray = [Point(x, y).buffer(r, quad_segs=16) for x, y, r in
-             ((cx + 6.9, cy + 4.2, 0.65), (cx + 8.2, cy + 2.2, 0.58), (cx + 5.6, cy + 6.0, 0.52))]
-
-    # wood brush stripe: parallel to the back, then following the curl
-    sr = (R + RI) / 2
-    sx, sy = cx + sr * math.cos(math.radians(160)), cy + sr * math.sin(math.radians(160))
-    sp = [(tail_x + 4.0 + (sx - tail_x - 4.0) * t, 0.9 + (sy - 0.9) * t ** 1.6)
-          for t in (i / 30 for i in range(31))]
-    sp += _arc(cx, cy, sr, 160, 70, 30)[1:]
-    stripe = _tapered_stroke(sp, 0.12, 0.26)
-
-    base = Polygon([(tail_x + 1.0, 0.0), (x_end - 1.0, 0.0), (x_end - 1.0, 0.95), (tail_x + 1.0, 0.95)])
-    g = unary_union([body, swell, base, *claws, *spray]).difference(stripe)
-
-    # scale/position: top just under the tagline, everything inside the safe circle
+    """A single line-art breaking wave: three grooves for blue epoxy."""
+    lines = [LineString(_catmull_rom(st)) for st in WAVE_STROKES]
     top_y = TAG_BASE - 1.7
-    sc = 1.5
-    for _ in range(120):
-        gg = affinity.scale(g, sc, sc, origin=(0, 0))
-        bx0, by0, bx1, by1 = gg.bounds
-        gg = affinity.translate(gg, -(bx0 + bx1) / 2, top_y - by1)
-        if gg.difference(Point(0, 0).buffer(R_SAFE - 0.3, quad_segs=64)).area < 1e-6:
+    sc = 0.05
+    for _ in range(200):
+        segs = [affinity.scale(l, sc, -sc, origin=(0, 0)) for l in lines]   # flip y (grid is y-down)
+        g = unary_union([l.buffer(WAVE_STROKE_W / 2, cap_style=1, join_style=1, quad_segs=12)
+                         for l in segs])
+        bx0, by0, bx1, by1 = g.bounds
+        g = affinity.translate(g, -(bx0 + bx1) / 2, top_y - by1)
+        if g.difference(Point(0, 0).buffer(R_SAFE - 0.3, quad_segs=64)).area < 1e-6:
             break
         sc *= 0.99
-    # keep only what the 1/32" cutter can actually make, so the file matches the result
-    r = TOOL_D / 2 * 0.98
-    return gg.buffer(-r, quad_segs=16).buffer(r, quad_segs=16).simplify(0.02)
+    return g.simplify(0.02)
 
 
 def to_stock(g):
