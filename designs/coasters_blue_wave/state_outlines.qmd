@@ -182,7 +182,7 @@ summary is also written to `data/mi_senate_2026_by_county.csv`.
 ```{r}
 #| label: senate-results
 
-sos_file <- file.path(out_dir, "data", "2026STATE_GENERAL_MI_CENR_BY_COUNTY.txt")
+sos_file <- file.path(out_dir, "designs/coasters_blue_wave/data", "2026STATE_GENERAL_MI_CENR_BY_COUNTY.txt")
 
 sos <- read.delim(sos_file, colClasses = "character", check.names = FALSE,
                   quote = "", strip.white = TRUE)
