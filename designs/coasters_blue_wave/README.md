@@ -7,10 +7,10 @@ Folders: `steph/`, `deb/`, `mom/`, `lynda/`.
 
 | File | Name | Tagline | State |
 |---|---|---|---|
-| `steph_01_tx_governor_hinojosa.c2d` | HINOJOSA! | 1ST SINCE ’95! | Texas |
+| `steph_01_tx_governor_hinojosa.c2d` | HINOJOSA! | 1ST SINCE 1995 | Texas |
 | `steph_02_tx_senate_talarico.c2d` | TALARICO! | +12% | Texas |
 | `steph_03_mi_governor_benson.c2d` | BENSON! | +11% | Michigan |
-| `steph_04_mi_senate_abdul.c2d` | ABDUL! | 1ST MUSLIM! | Michigan |
+| `steph_04_mi_senate_abdul.c2d` | ABDUL! | 1ST MUSLIM | Michigan |
 
 ![previews](steph/previews/contact_sheet.png)
 

@@ -45,13 +45,13 @@ TOOL_D = 0.79502        # #122 1/32" flat end mill
 
 DESIGNS = [
     dict(file="steph_01_tx_governor_hinojosa", state="Texas",
-         name="HINOJOSA!", tag="1ST SINCE ’95!"),
+         name="HINOJOSA!", tag="1ST SINCE 1995"),
     dict(file="steph_02_tx_senate_talarico", state="Texas",
          name="TALARICO!", tag="+12%"),
     dict(file="steph_03_mi_governor_benson", state="Michigan",
          name="BENSON!", tag="+11%"),
     dict(file="steph_04_mi_senate_abdul", state="Michigan",
-         name="ABDUL!", tag="1ST MUSLIM!"),
+         name="ABDUL!", tag="1ST MUSLIM"),
 ]
 
 # vertical bands, y measured upward from the coaster centre
