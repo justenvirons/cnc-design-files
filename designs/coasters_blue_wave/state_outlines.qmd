@@ -375,16 +375,15 @@ independents; shares are computed within each chamber and year (100 Senate
 seats, 435 House seats).
 
 The SVG is plain line geometry for engraving, sized in millimetres like the
-other exports, with no text or colour:
+other exports, with no text, colour or hatching:
 
-- each pie is a circle outline plus radial lines at the slice boundaries
-  (slices start at 12 o'clock and run clockwise: Republican, Democratic, Other)
-- **Republican** slices: single-direction hatching (45 degrees)
-- **Democratic** slices: cross-hatching (45 and 135 degrees)
-- **Other** slices: no hatching
+- each pie keeps its full circle as a separate closed path
+- each slice is its own closed path (centre, arc, back to centre), so it can be
+  selected and pocketed on its own; slices start at 12 o'clock and run
+  clockwise: Republican, Democratic, Other (slices with no seats are skipped)
 
-Lines are grouped (`outlines`, `hatch_republican`, `hatch_democratic`) so each
-set can be given its own toolpath.
+Paths are grouped (`circles`, `slices_republican`, `slices_democratic`,
+`slices_other`) and each slice path has an `id` such as `senate_2026_democratic`.
 
 ```{r}
 #| label: congress-party-share
@@ -412,11 +411,9 @@ congress <- tibble::tribble(
 pie_d_mm   <- 30      # diameter of each pie
 pie_gap_mm <- 8       # space between pies
 margin_mm  <- 2       # space around the grid
-hatch_mm   <- 2.5     # hatch line spacing (coarse)
 line_w_mm  <- 0.3     # stroke width (display only)
 
 party_order <- c("Republican", "Democratic", "Other")
-hatch_angles <- list(Republican = 45, Democratic = c(45, 135), Other = numeric(0))
 rows <- c("Senate", "House")
 cols <- c(2024, 2026)
 
@@ -427,35 +424,18 @@ size_h <- 2 * margin_mm + length(rows) * pie_d_mm + (length(rows) - 1) * pie_gap
 # Geometry helpers (SVG space: x right, y down; angles clockwise from 12 o'clock)
 pie_pt <- function(cx, cy, r, a) cbind(cx + r * sin(a), cy - r * cos(a))
 
-slice_poly <- function(cx, cy, r, a0, a1) {
+pts_d <- function(m, close = TRUE)
+  paste0("M", paste(sprintf("%.3f,%.3f", m[, 1], m[, 2]), collapse = " L"), if (close) " Z" else "")
+
+# closed slice: centre -> arc from a0 to a1 -> back to centre
+slice_d <- function(cx, cy, r, a0, a1) {
   arc <- pie_pt(cx, cy, r, seq(a0, a1, length.out = max(3, ceiling((a1 - a0) / 0.02))))
-  st_polygon(list(rbind(c(cx, cy), arc, c(cx, cy))))
-}
-
-# parallel lines at angle `deg` (0 = horizontal) covering a circle, spaced `step`
-hatch_lines <- function(cx, cy, r, deg, step) {
-  th <- deg * pi / 180
-  u  <- c(cos(th), -sin(th))            # line direction (y flipped for SVG)
-  n  <- c(sin(th),  cos(th))            # normal
-  offs <- seq(-r, r, by = step)
-  offs <- offs - mean(offs)             # centre the pattern on the pie
-  st_multilinestring(lapply(offs, function(o) {
-    p <- c(cx, cy) + o * n
-    rbind(p - 1.5 * r * u, p + 1.5 * r * u)
-  }))
-}
-
-lines_d <- function(g) {
-  if (is.null(g) || st_is_empty(g)) return(character(0))
-  xy <- as.data.frame(st_coordinates(g))
-  grp <- if ("L2" %in% names(xy)) interaction(xy$L1, xy$L2, drop = TRUE) else xy$L1
-  vapply(split(xy, grp), function(l)
-    paste0("M", paste(sprintf("%.3f,%.3f", l$X, l$Y), collapse = " L")), character(1))
+  pts_d(rbind(c(cx, cy), arc))
 }
 
 # Build the paths ----------------------------------------------------------
-outline_d <- character(0)
-hatch_d   <- list(Republican = character(0), Democratic = character(0))
+circle_d <- character(0)
+slices   <- list(Republican = character(0), Democratic = character(0), Other = character(0))
 
 for (i in seq_along(rows)) for (j in seq_along(cols)) {
   cx <- margin_mm + r_mm + (j - 1) * (pie_d_mm + pie_gap_mm)
@@ -467,40 +447,31 @@ for (i in seq_along(rows)) for (j in seq_along(cols)) {
     arrange(party) |>
     mutate(a1 = 2 * pi * cumsum(share), a0 = a1 - 2 * pi * share)
 
-  # circle outline + radial boundaries (none if one party holds every seat)
-  circ <- pie_pt(cx, cy, r_mm, seq(0, 2 * pi, length.out = 241))
-  outline_d <- c(outline_d,
-                 paste0("M", paste(sprintf("%.3f,%.3f", circ[, 1], circ[, 2]), collapse = " L"), " Z"))
-  if (nrow(d) > 1) {
-    for (a in d$a0) {
-      e <- pie_pt(cx, cy, r_mm, a)
-      outline_d <- c(outline_d, sprintf("M%.3f,%.3f L%.3f,%.3f", cx, cy, e[1], e[2]))
-    }
-  }
+  # full circle, kept as its own closed path
+  circle_d <- c(circle_d, sprintf('  <path id="%s_%s_circle" d="%s"/>', tolower(rows[i]), cols[j],
+                                  pts_d(pie_pt(cx, cy, r_mm, seq(0, 2 * pi, length.out = 241)[-241]))))
 
-  # hatching clipped to each slice
+  # one closed path per slice
   for (k in seq_len(nrow(d))) {
     p <- as.character(d$party[k])
-    if (length(hatch_angles[[p]]) == 0) next
-    sl <- slice_poly(cx, cy, r_mm, d$a0[k], d$a1[k])
-    for (deg in hatch_angles[[p]]) {
-      hatch_d[[p]] <- c(hatch_d[[p]], lines_d(st_intersection(hatch_lines(cx, cy, r_mm, deg, hatch_mm), sl)))
-    }
+    slices[[p]] <- c(slices[[p]], sprintf('  <path id="%s_%s_%s" d="%s"/>',
+                                          tolower(rows[i]), cols[j], tolower(p),
+                                          slice_d(cx, cy, r_mm, d$a0[k], d$a1[k])))
   }
 }
 
 # Write the SVG -------------------------------------------------------------
-grp <- function(id, d) c(sprintf('<g id="%s">', id), sprintf('  <path d="%s"/>', d), "</g>")
+grp <- function(id, paths) c(sprintf('<g id="%s">', id), paths, "</g>")
 writeLines(c(
   '<?xml version="1.0" encoding="UTF-8" standalone="no"?>',
   sprintf(paste0('<svg xmlns="http://www.w3.org/2000/svg" version="1.1" ',
                  'width="%.3fmm" height="%.3fmm" viewBox="0 0 %.3f %.3f">'),
           size_w, size_h, size_w, size_h),
-  sprintf('<g fill="none" stroke="black" stroke-width="%.2f" stroke-linecap="round" stroke-linejoin="round">',
-          line_w_mm),
-  grp("hatch_republican", hatch_d$Republican),
-  grp("hatch_democratic", hatch_d$Democratic),
-  grp("outlines", outline_d),
+  sprintf('<g fill="none" stroke="black" stroke-width="%.2f" stroke-linejoin="round">', line_w_mm),
+  grp("circles", circle_d),
+  grp("slices_republican", slices$Republican),
+  grp("slices_democratic", slices$Democratic),
+  grp("slices_other", slices$Other),
   "</g>",
   "</svg>"), file.path(out_dir, "congress_party_share_2024_2026.svg"))
 
