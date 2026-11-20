@@ -164,6 +164,17 @@ and joins them to the county geometries. Michigan's `CountyCode` numbers the 83
 counties alphabetically, so the county FIPS code is `26000 + 2 * CountyCode - 1`;
 the chunk also checks every county name against tigris.
 
+**Data sources**
+
+- Michigan Voter Information Center, county results for the November 3, 2026
+  general election (source of the tab-delimited export):
+  <https://mvic.sos.state.mi.us/votehistory/Index?type=C&electionDate=11-3-2026>
+- Michigan Department of State, *Election Results and Data*:
+  <https://www.michigan.gov/sos/elections/election-results-and-data>
+
+These are preliminary, unofficial results until certified by the Michigan Board
+of State Canvassers.
+
 Re-download the file and render again to pick up later counts, including the
 certified results once the Board of State Canvassers has met. A tidy county
 summary is also written to `data/mi_senate_2026_by_county.csv`.
@@ -250,4 +261,106 @@ pal <- colorRampPalette(c("#b2182b", "#f7f7f7", "#2166ac"))(21)   # Rogers - eve
 plot(mi_senate["margin_pct"], pal = pal, breaks = seq(-lim, lim, length.out = 22),
      border = "white", lwd = 0.3,
      main = "2026 U.S. Senate, Michigan (unofficial): El-Sayed minus Rogers, pct. points")
+```
+
+### GeoJSON export
+
+Two GeoJSON files are written to `data/`, in WGS84 longitude/latitude
+(EPSG:4326, as the GeoJSON standard expects), each with the county vote totals,
+shares, margin and winner as attributes:
+
+- `mi_counties_senate_2026.geojson` - all 83 Michigan counties
+- `mi_counties_el_sayed_advantage_2026.geojson` - only the counties where
+  El-Sayed led Rogers (`margin_pct > 0`)
+
+```{r}
+#| label: geojson-export
+
+geo_out <- mi_senate |>
+  select(GEOID, county, el_sayed_votes, rogers_votes, other_votes, total_votes,
+         el_sayed_pct, rogers_pct, margin_pct, winner) |>
+  mutate(across(ends_with("_pct"), \(x) round(x, 2))) |>
+  st_transform(4326)
+
+all_file <- file.path(out_dir, "data", "mi_counties_senate_2026.geojson")
+es_file  <- file.path(out_dir, "data", "mi_counties_el_sayed_advantage_2026.geojson")
+
+st_write(geo_out, all_file, driver = "GeoJSON", delete_dsn = TRUE, quiet = TRUE)
+st_write(filter(geo_out, margin_pct > 0), es_file,
+         driver = "GeoJSON", delete_dsn = TRUE, quiet = TRUE)
+
+tibble::tibble(file     = basename(c(all_file, es_file)),
+               counties = c(nrow(geo_out), sum(geo_out$margin_pct > 0)))
+```
+
+### SVG export
+
+The same two county sets are also exported as SVG, like the state outlines:
+sized in millimetres (`width_mm` wide) for Carbide Create, with each county as
+its own closed path (`id` = county name). Both files share the full-Michigan
+frame, so the El-Sayed counties line up exactly when laid over the all-counties
+file. Island parts that aren't part of the main state outline (Isle Royale,
+Beaver Island, etc.) are dropped, and lines are simplified by `simplify_m`.
+
+- `mi_counties_senate_2026.svg` - all 83 counties
+- `mi_counties_el_sayed_advantage_2026.svg` - counties where El-Sayed led
+
+```{r}
+#| label: svg-export
+
+# main land masses of Michigan (same island rule as the state outline)
+mi_main <- states_cb |>
+  filter(STUSPS == "MI") |>
+  st_transform(3078) |>
+  keep_main_parts(min_part_frac)
+
+# drop county parts that don't touch the main state outline, then simplify
+county_shapes <- mi_senate |>
+  select(GEOID, county, margin_pct) |>
+  st_cast("POLYGON", warn = FALSE)
+county_shapes <- county_shapes[lengths(st_intersects(county_shapes, mi_main)) > 0, ] |>
+  group_by(GEOID, county, margin_pct) |>
+  summarise(.groups = "drop")
+if (simplify_m > 0) {
+  county_shapes <- st_simplify(county_shapes, preserveTopology = TRUE, dTolerance = simplify_m)
+}
+
+# Write each feature as its own outlined path, in a shared frame (bbox) sized in mm
+write_features_svg <- function(x, file, width_mm, bbox, id_col = "county") {
+  scale <- width_mm / as.numeric(bbox["xmax"] - bbox["xmin"])
+  h_mm  <- as.numeric(bbox["ymax"] - bbox["ymin"]) * scale
+
+  paths <- vapply(seq_len(nrow(x)), function(i) {
+    xy <- as.data.frame(st_coordinates(st_cast(st_geometry(x[i, ]), "POLYGON"))) |>
+      mutate(px = (X - bbox["xmin"]) * scale,
+             py = (bbox["ymax"] - Y) * scale)            # SVG y runs downward
+    rings <- split(xy, list(xy$L2, xy$L1), drop = TRUE)
+    d <- vapply(rings, function(r) {
+      pts <- sprintf("%.3f,%.3f", r$px, r$py)
+      paste0("M", pts[1], " L", paste(pts[-1], collapse = " "), " Z")
+    }, character(1))
+    sprintf('  <path id="%s" d="%s"/>', x[[id_col]][i], paste(d, collapse = " "))
+  }, character(1))
+
+  writeLines(c(
+    '<?xml version="1.0" encoding="UTF-8" standalone="no"?>',
+    sprintf(paste0('<svg xmlns="http://www.w3.org/2000/svg" version="1.1" ',
+                   'width="%.3fmm" height="%.3fmm" viewBox="0 0 %.3f %.3f">'),
+            width_mm, h_mm, width_mm, h_mm),
+    '<g fill="none" stroke="black" stroke-width="0.1" stroke-linejoin="round">',
+    paths,
+    "</g>",
+    "</svg>"), file)
+  invisible(c(width_mm = width_mm, height_mm = h_mm))
+}
+
+frame <- st_bbox(county_shapes)                 # full Michigan frame for both files
+svg_all <- file.path(out_dir, "data", "mi_counties_senate_2026.svg")
+svg_es  <- file.path(out_dir, "data", "mi_counties_el_sayed_advantage_2026.svg")
+
+write_features_svg(county_shapes, svg_all, width_mm, frame)
+write_features_svg(filter(county_shapes, margin_pct > 0), svg_es, width_mm, frame)
+
+tibble::tibble(file     = basename(c(svg_all, svg_es)),
+               counties = c(nrow(county_shapes), sum(county_shapes$margin_pct > 0)))
 ```
