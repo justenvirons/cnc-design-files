@@ -56,10 +56,9 @@ DESIGNS = [
 ]
 
 # vertical bands, y measured upward from the coaster centre
-NAME_BASE, NAME_CAP_MAX = 15.0, 10.5
-STATE_TOP, STATE_BOTTOM, STATE_W_MAX = 11.5, -11.8, 48.0
-TAG_BASE, TAG_CAP_MAX = -20.6, 6.8
-WAVE_Y = -28.4
+NAME_BASE, NAME_CAP_MAX = 16.2, 10.5
+STATE_TOP, STATE_BOTTOM, STATE_W_MAX = 12.4, -10.4, 48.0
+TAG_BASE, TAG_CAP_MAX = -19.0, 6.6
 TEXT_MARGIN = 3.0       # extra clearance from the safe circle for text
 
 # ---------------------------------------------------------------- geometry helpers
@@ -168,47 +167,94 @@ def state_shape(name):
     return g
 
 
+def _arc(cx, cy, r, a0, a1, n=72):
+    return [(cx + r * math.cos(math.radians(a0 + (a1 - a0) * i / n)),
+             cy + r * math.sin(math.radians(a0 + (a1 - a0) * i / n))) for i in range(n + 1)]
+
+
+def _tapered_stroke(spine, r0, r1):
+    """Union of circles along a spine with radius tapering r0 -> r1 (round-tipped claw)."""
+    n = len(spine) - 1
+    return unary_union([Point(x, y).buffer(r0 + (r1 - r0) * i / n, quad_segs=16)
+                        for i, (x, y) in enumerate(spine)])
+
+
 def wave_shape():
-    """A small breaking wave: a ribbon that rises to a crest and curls forward, twice."""
-    stroke = 1.7                     # ribbon width (> 2x the 0.8 mm tool so it pockets cleanly)
-    r0 = 2.9                         # curl radius; crest height = 2 * r0
-    rise = 10.5                      # horizontal run of each wave's back slope
-    crests = 2
-    pts = []
-    x = 0.0
-    for k in range(crests):
-        # back slope: eased rise from the baseline (y=0) to the crest (y=2*r0)
-        for i in range(41):
-            t = i / 40
-            pts.append((x + rise * t, r0 * (1 - math.cos(math.pi * t ** 1.3))))
-        cx, cy = x + rise, r0
-        # curl: clockwise spiral starting at the crest; on the last wave it rolls all the way
-        # in, on earlier waves it stops at the bottom and the next back slope carries on
-        sweep = 1.75 * math.pi if k == crests - 1 else math.pi
-        n = 60
-        for i in range(1, n + 1):
-            t = i / n
-            a = math.pi / 2 - sweep * t
-            rr = r0 * (1 - 0.45 * t * sweep / (1.75 * math.pi))
-            if k < crests - 1:
-                rr = r0                                   # half-turn down to the baseline
-            pts.append((cx + rr * math.cos(a), cy + rr * math.sin(a)))
-        if k < crests - 1:
-            # inner curl for this crest, as a separate stroke tucked inside the half-turn
-            curl = []
-            for i in range(41):
-                t = i / 40
-                a = -math.pi / 2 - 0.9 * math.pi * t
-                rr = r0 * (1 - 0.45 * t)
-                curl.append((cx + rr * math.cos(a), cy + rr * math.sin(a)))
-            curl_line = LineString(curl)
-        x = cx
-    parts = [LineString(pts).buffer(stroke / 2, cap_style=1, join_style=1, quad_segs=24)]
-    if crests > 1:
-        parts.append(curl_line.buffer(stroke / 2, cap_style=1, join_style=1, quad_segs=24))
-    g = unary_union(parts).simplify(0.02)
-    minx, miny, maxx, maxy = g.bounds
-    return affinity.translate(g, -(minx + maxx) / 2, WAVE_Y - (miny + maxy) / 2)
+    """A single great curling wave, simplified woodblock style.
+
+    Built in local units (roughly mm) then scaled to sit under the tagline:
+      body  - back of the wave rising from a tapered tail, rolling over into the crest
+      eye   - hollow under the curl (left as wood), open at the bottom like a tube
+      claws - foam fingers reaching off the leading lip
+      spray - a few foam dots ahead of the crest
+      swell - low trailing water to the right with a small secondary hump
+      stripe- a thin wood line through the body and curl, like a brush stroke
+    """
+    cx, cy, R, RI = 13.0, 6.0, 5.0, 2.6            # crest centre, outer / eye radius
+    lip = -40                                      # angle where the curl ends
+    jx, jy = cx + R * math.cos(math.radians(160)), cy + R * math.sin(math.radians(160))
+    tail_x = 1.5
+    back = [(tail_x + (jx - tail_x) * t, jy * t ** 2.0) for t in (i / 60 for i in range(61))]
+    outer = _arc(cx, cy, R, 160, lip)
+    inner = _arc(cx, cy, RI, lip, 205)
+    fx, fy = inner[-1]
+    face_end = (cx + 2.6, 0.0)
+    ctrl = (cx - 1.6, 0.4)                         # hollow, concave wave face
+    face = [((1 - t) ** 2 * fx + 2 * (1 - t) * t * ctrl[0] + t * t * face_end[0],
+             (1 - t) ** 2 * fy + 2 * (1 - t) * t * ctrl[1] + t * t * face_end[1])
+            for t in (i / 30 for i in range(1, 31))]
+    body = Polygon(back + outer[1:] + inner + face + [(tail_x, 0.0)]).buffer(0)
+
+    # trailing swell with a small hump
+    sw_top = []
+    x_end = cx + 10.0
+    for i in range(61):
+        x = cx + 1.5 + (x_end - cx - 1.5) * i / 60
+        taper = min(1.0, (x_end - x) / 2.2)
+        sw_top.append((x, max(0.0, taper * (0.95 + 1.0 * math.exp(-((x - (cx + 6.3)) / 1.4) ** 2)))))
+    swell = Polygon([(cx + 1.0, 0.0)] + sw_top + [(x_end, 0.0)])
+
+    # foam claws off the outer edge of the crest, curling forward and down
+    claws = []
+    for ang, length in ((36, 2.2), (14, 2.6), (-8, 2.6), (-30, 2.3)):
+        a = math.radians(ang)
+        x, y = cx + (R - 0.5) * math.cos(a), cy + (R - 0.5) * math.sin(a)
+        heading = a - math.radians(20)
+        spine = [(x, y)]
+        for _ in range(12):
+            heading -= math.radians(6.0)            # bend clockwise as it reaches out
+            x += length / 12 * math.cos(heading)
+            y += length / 12 * math.sin(heading)
+            spine.append((x, y))
+        claws.append(_tapered_stroke(spine, 0.8, 0.5))
+
+    spray = [Point(x, y).buffer(r, quad_segs=16) for x, y, r in
+             ((cx + 6.9, cy + 4.2, 0.65), (cx + 8.2, cy + 2.2, 0.58), (cx + 5.6, cy + 6.0, 0.52))]
+
+    # wood brush stripe: parallel to the back, then following the curl
+    sr = (R + RI) / 2
+    sx, sy = cx + sr * math.cos(math.radians(160)), cy + sr * math.sin(math.radians(160))
+    sp = [(tail_x + 4.0 + (sx - tail_x - 4.0) * t, 0.9 + (sy - 0.9) * t ** 1.6)
+          for t in (i / 30 for i in range(31))]
+    sp += _arc(cx, cy, sr, 160, 70, 30)[1:]
+    stripe = _tapered_stroke(sp, 0.12, 0.26)
+
+    base = Polygon([(tail_x + 1.0, 0.0), (x_end - 1.0, 0.0), (x_end - 1.0, 0.95), (tail_x + 1.0, 0.95)])
+    g = unary_union([body, swell, base, *claws, *spray]).difference(stripe)
+
+    # scale/position: top just under the tagline, everything inside the safe circle
+    top_y = TAG_BASE - 1.7
+    sc = 1.5
+    for _ in range(120):
+        gg = affinity.scale(g, sc, sc, origin=(0, 0))
+        bx0, by0, bx1, by1 = gg.bounds
+        gg = affinity.translate(gg, -(bx0 + bx1) / 2, top_y - by1)
+        if gg.difference(Point(0, 0).buffer(R_SAFE - 0.3, quad_segs=64)).area < 1e-6:
+            break
+        sc *= 0.99
+    # keep only what the 1/32" cutter can actually make, so the file matches the result
+    r = TOOL_D / 2 * 0.98
+    return gg.buffer(-r, quad_segs=16).buffer(r, quad_segs=16).simplify(0.02)
 
 
 def to_stock(g):

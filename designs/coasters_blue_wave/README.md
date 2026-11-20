@@ -21,7 +21,7 @@ XY zero at the coaster centre, Z zero at the top surface. All artwork stays insi
 |---|---|---|---|
 | `text` | pocket | #122 1/32" flat | 1.27 mm |
 | `state` | pocket | #122 1/32" flat | 1.27 mm |
-| `wave` | pocket (fill with blue epoxy) | #122 1/32" flat | 1.524 mm |
+| `wave` | pocket (fill with blue epoxy) – single curling wave, woodblock style | #122 1/32" flat | 1.524 mm |
 
 Toolpaths are layer-based; Carbide Create computes them when the file is opened (no G-code stored).
 
